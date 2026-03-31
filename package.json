@@ -1,0 +1,27 @@
+{
+  "name": "elenchus-benchmark",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone HTTP benchmark CLI for the Elenchus validator.",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "prepare": "node --import tsx/esm src/cli/prepare.ts",
+    "benchmark": "node --import tsx/esm src/cli/benchmark.ts",
+    "benchmark:pilot": "node --import tsx/esm src/cli/benchmark.ts --pilot",
+    "analyze": "node --import tsx/esm src/cli/analyze.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --import tsx/esm tests/*.test.ts"
+  },
+  "dependencies": {
+    "csv-parse": "^5.6.0",
+    "dotenv": "^16.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
