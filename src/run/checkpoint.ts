@@ -45,3 +45,24 @@ export function selectPendingScenarioIds(
   const completed = new Set(completedScenarioIds);
   return scenarioIds.filter((scenarioId) => !completed.has(scenarioId));
 }
+
+/**
+ * Asserts that a stored run manifest is compatible with the requested resume
+ * parameters. Throws a descriptive error if there is a mismatch.
+ */
+export function assertResumeCompatible(
+  manifest: RunManifest,
+  mode: "pilot" | "full",
+  validatorGitSha: string,
+): void {
+  if (manifest.mode !== mode) {
+    throw new Error(
+      `Cannot resume ${mode} run: latest run manifest is for mode=${manifest.mode}. Start a new ${mode} run without --resume, or resume the matching mode.`,
+    );
+  }
+  if (manifest.validator.gitSha !== validatorGitSha) {
+    throw new Error(
+      `Cannot resume run ${manifest.runId}: validator git SHA mismatch (${manifest.validator.gitSha} vs ${validatorGitSha}).`,
+    );
+  }
+}

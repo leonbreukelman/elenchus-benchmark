@@ -56,10 +56,9 @@ function extractBecausePrefix(text: string): string | null {
 }
 
 function extractReasoning(text: string): string | null {
-  const idx = text.search(/\s+because\s+/i);
-  if (idx === -1) return null;
-  const afterBecause = text.slice(idx).replace(/^\s+because\s+/i, "").trim();
-  return afterBecause || null;
+  const match = text.match(/\bbecause\b\s+(.+)$/i);
+  if (!match) return null;
+  return match[1].trim() || null;
 }
 
 type RawRow = { text: string; label: string };

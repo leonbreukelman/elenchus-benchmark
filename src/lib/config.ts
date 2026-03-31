@@ -13,17 +13,14 @@ export interface RunConfig extends PrepareConfig {
 }
 
 export function shouldSkipPrepareForInstallLifecycle(): boolean {
-  // npm 11+ sets npm_command="run" for `npm run <script>`.
-  // Earlier npm versions used "run-script". Either way, we should only skip
-  // when prepare fires as a lifecycle hook from `npm install` or `npm ci`,
-  // not when the user explicitly runs `npm run prepare`.
-  const event = process.env.npm_lifecycle_event;
-  const command = process.env.npm_command;
-  if (event !== "prepare") return false;
-  // Allow explicit runs via `npm run prepare` (command is "run" or "run-script").
-  if (command === "run" || command === "run-script") return false;
-  // Skip for install/ci lifecycle triggers.
-  return true;
+  if (process.env.npm_lifecycle_event !== "prepare") return false;
+  // When the user explicitly runs `npm run prepare`, npm sets npm_command to
+  // "run-script" (npm < 11) or "run" (npm 11+). During `npm install` or
+  // `npm ci`, npm_command is "install" or "ci". Skip only for the lifecycle
+  // case so a pre-existing BENCHMARK_SEED in .env does not trigger
+  // preparation during install.
+  const npmCommand = process.env.npm_command;
+  return npmCommand !== "run-script" && npmCommand !== "run";
 }
 
 export function readPrepareConfig(): PrepareConfig {

@@ -7,6 +7,7 @@ import { getGitShaIfAvailable } from "../lib/git.js";
 import { cleanDirectory, ensureDir, pathExists, readJsonFile, writeJsonAtomic } from "../lib/io.js";
 import { projectRoot, resolveProjectPath, resultsDir, scenariosDir } from "../lib/paths.js";
 import {
+  assertResumeCompatible,
   createCheckpointFromManifest,
   loadCheckpoint,
   selectPendingScenarioIds,
@@ -38,7 +39,26 @@ function buildRunId(mode: "pilot" | "full"): string {
 }
 
 function pilotSelection(scenarios: NormalizedScenario[]): NormalizedScenario[] {
-  const fallacy = scenarios.filter((scenario) => scenario.source === "fallacy-pairs").slice(0, 6);
+  // Group fallacy scenarios by pairId so we can select complete pairs.
+  const pairGroups = new Map<string, { control?: NormalizedScenario; attack?: NormalizedScenario }>();
+  for (const scenario of scenarios) {
+    if (scenario.source !== "fallacy-pairs" || !scenario.pairId) continue;
+    const group = pairGroups.get(scenario.pairId) ?? {};
+    if (scenario.pairRole === "control") group.control = scenario;
+    else if (scenario.pairRole === "attack") group.attack = scenario;
+    pairGroups.set(scenario.pairId, group);
+  }
+
+  // Take the first 3 complete pairs (both control and attack present).
+  const fallacy: NormalizedScenario[] = [];
+  for (const group of pairGroups.values()) {
+    if (fallacy.length >= 6) break;
+    if (group.control && group.attack) {
+      fallacy.push(group.control, group.attack);
+    }
+  }
+  fallacy.sort((left, right) => left.id.localeCompare(right.id));
+
   const ibm = scenarios.filter((scenario) => scenario.source === "ibm-aq").slice(0, 4);
   return [...fallacy, ...ibm];
 }
@@ -275,6 +295,7 @@ export async function runBenchmark(config: {
       throw new Error("Cannot resume: results/run-manifest.json does not exist.");
     }
     manifest = await readJsonFile<RunManifest>(latestPath);
+    assertResumeCompatible(manifest, config.mode, config.validatorGitSha);
     checkpoint = (await loadCheckpoint(manifest.runId)) ?? createCheckpointFromManifest(manifest);
     manifest.resumed = true;
     await initializeRunDirectories(manifest.mode, manifest.runId, true);
