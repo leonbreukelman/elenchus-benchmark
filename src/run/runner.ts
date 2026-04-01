@@ -270,6 +270,80 @@ async function initializeRunDirectories(
   return { rawDir };
 }
 
+const VALID_OUTCOME_CATEGORIES = new Set<string>([
+  "benchmark_outcome",
+  "validator_system_failure",
+  "transport_failure",
+]);
+
+/**
+ * Reconciles manifest.resultPaths and manifest.counts from checkpoint state.
+ *
+ * When a run is interrupted after writeCheckpoint() but before writeRunManifest(),
+ * the checkpoint may contain completed scenario entries that are absent from the
+ * manifest. This function closes that gap by reading each such result file and
+ * incorporating it into the manifest. Throws on any sign of corruption so that
+ * stale or missing data is surfaced explicitly rather than silently skipped.
+ *
+ * If `persistPath` is provided and reconciliation added any entries, the corrected
+ * manifest is written atomically to that path before returning, ensuring persisted
+ * state is structurally reconciled before the run loop continues.
+ */
+export async function reconcileManifestFromCheckpoint(
+  manifest: RunManifest,
+  checkpoint: RunCheckpoint,
+  persistPath?: string,
+): Promise<void> {
+  const manifestCompleted = new Set(Object.keys(manifest.resultPaths));
+  let changed = false;
+
+  for (const scenarioId of checkpoint.completedScenarioIds) {
+    if (manifestCompleted.has(scenarioId)) continue;
+
+    const resultPath = checkpoint.resultPaths[scenarioId];
+    if (!resultPath) {
+      throw new Error(
+        `Resume corruption: checkpoint lists scenario ${scenarioId} as completed but checkpoint.resultPaths has no entry for it.`,
+      );
+    }
+
+    if (!(await pathExists(resultPath))) {
+      throw new Error(
+        `Resume corruption: checkpoint lists scenario ${scenarioId} as completed but result file does not exist: ${resultPath}`,
+      );
+    }
+
+    let result: RunResult;
+    try {
+      result = await readJsonFile<RunResult>(resultPath);
+    } catch (error) {
+      throw new Error(
+        `Resume corruption: failed to read result file for scenario ${scenarioId} at ${resultPath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (result.scenarioId !== scenarioId) {
+      throw new Error(
+        `Resume corruption: result file for scenario ${scenarioId} has mismatched scenarioId "${result.scenarioId}" at ${resultPath}`,
+      );
+    }
+
+    if (!result.parsed?.outcomeCategory || !VALID_OUTCOME_CATEGORIES.has(result.parsed.outcomeCategory as string)) {
+      throw new Error(
+        `Resume corruption: result file for scenario ${scenarioId} has invalid outcomeCategory "${result.parsed?.outcomeCategory}" at ${resultPath}`,
+      );
+    }
+
+    manifest.resultPaths[scenarioId] = resultPath;
+    incrementCounts(manifest, result);
+    changed = true;
+  }
+
+  if (changed && persistPath !== undefined) {
+    await writeJsonAtomic(persistPath, manifest);
+  }
+}
+
 export async function runBenchmark(config: {
   mode: "pilot" | "full";
   resume: boolean;
@@ -277,6 +351,7 @@ export async function runBenchmark(config: {
   validatorGitSha: string;
   validatorVersion?: string;
   benchmarkSeed: string;
+  onProgress?: (manifest: RunManifest) => void | Promise<void>;
 }): Promise<RunManifest> {
   const scenarioIds = await loadScenarioIds();
   const allScenarios = await Promise.all(scenarioIds.map((id) => loadScenario(id)));
@@ -298,6 +373,7 @@ export async function runBenchmark(config: {
     assertResumeCompatible(manifest, config.mode, config.validatorGitSha);
     checkpoint = (await loadCheckpoint(manifest.runId)) ?? createCheckpointFromManifest(manifest);
     manifest.resumed = true;
+    await reconcileManifestFromCheckpoint(manifest, checkpoint, latestPath);
     await initializeRunDirectories(manifest.mode, manifest.runId, true);
   } else {
     const runId = buildRunId(config.mode);
@@ -312,6 +388,12 @@ export async function runBenchmark(config: {
     });
     checkpoint = createCheckpointFromManifest(manifest);
     await initializeRunDirectories(config.mode, runId, false);
+  }
+
+  await writeCheckpoint(checkpoint);
+  await writeRunManifest(manifest);
+  if (config.onProgress) {
+    await config.onProgress(structuredClone(manifest));
   }
 
   const { rawDir } = await initializeRunDirectories(manifest.mode, manifest.runId, true);
@@ -341,10 +423,16 @@ export async function runBenchmark(config: {
     incrementCounts(manifest, result);
     await writeCheckpoint(checkpoint);
     await writeRunManifest(manifest);
+    if (config.onProgress) {
+      await config.onProgress(structuredClone(manifest));
+    }
   }
 
   manifest.completedAt = new Date().toISOString();
   await writeRunManifest(manifest);
+  if (config.onProgress) {
+    await config.onProgress(structuredClone(manifest));
+  }
   return manifest;
 }
 

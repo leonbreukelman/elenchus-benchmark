@@ -12,6 +12,9 @@
     "benchmark": "node --import tsx/esm src/cli/benchmark.ts",
     "benchmark:pilot": "node --import tsx/esm src/cli/benchmark.ts --pilot",
     "analyze": "node --import tsx/esm src/cli/analyze.ts",
+    "study": "node --import tsx/esm src/cli/study.ts",
+    "study:run": "./scripts/run-study.sh",
+    "study:resume": "./scripts/run-study.sh --resume",
     "typecheck": "tsc --noEmit",
     "test": "node --test --import tsx/esm tests/*.test.ts"
   },

@@ -8,6 +8,7 @@ export const projectRoot = path.resolve(currentDir, "../..");
 export const scenariosDir = path.join(projectRoot, "scenarios");
 export const resultsDir = path.join(projectRoot, "results");
 export const checkpointsDir = path.join(resultsDir, "checkpoints");
+export const studiesDir = path.join(resultsDir, "studies");
 
 export function resolveProjectPath(...segments: string[]): string {
   return path.join(projectRoot, ...segments);

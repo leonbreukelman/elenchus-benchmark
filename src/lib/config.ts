@@ -6,6 +6,12 @@ export interface PrepareConfig {
   benchmarkGitSha?: string;
 }
 
+export interface ValidatorConfig {
+  validatorUrl: string;
+  validatorGitSha: string;
+  validatorVersion?: string;
+}
+
 export interface RunConfig extends PrepareConfig {
   validatorUrl: string;
   validatorGitSha: string;
@@ -23,20 +29,30 @@ export function shouldSkipPrepareForInstallLifecycle(): boolean {
   return npmCommand !== "run-script" && npmCommand !== "run";
 }
 
-export function readPrepareConfig(): PrepareConfig {
-  const benchmarkSeed = process.env.BENCHMARK_SEED?.trim();
+function requireBenchmarkSeed(seed: string | undefined): string {
+  const benchmarkSeed = seed?.trim();
   if (!benchmarkSeed) {
     throw new Error("BENCHMARK_SEED is required. Set it in your environment or .env before running npm run prepare.");
   }
+  return benchmarkSeed;
+}
 
+export function readOptionalHfToken(): string | undefined {
+  return process.env.HF_TOKEN?.trim() || undefined;
+}
+
+export function createPrepareConfig(benchmarkSeed: string): PrepareConfig {
   return {
-    benchmarkSeed,
-    hfToken: process.env.HF_TOKEN?.trim() || undefined,
+    benchmarkSeed: requireBenchmarkSeed(benchmarkSeed),
+    hfToken: readOptionalHfToken(),
   };
 }
 
-export function readRunConfig(): RunConfig {
-  const prepareConfig = readPrepareConfig();
+export function readPrepareConfig(): PrepareConfig {
+  return createPrepareConfig(requireBenchmarkSeed(process.env.BENCHMARK_SEED));
+}
+
+export function readValidatorConfig(): ValidatorConfig {
   const validatorGitSha = process.env.VALIDATOR_GIT_SHA?.trim();
 
   if (!validatorGitSha) {
@@ -44,11 +60,21 @@ export function readRunConfig(): RunConfig {
   }
 
   return {
-    ...prepareConfig,
     validatorUrl: process.env.VALIDATOR_URL?.trim() || "http://localhost:3000",
     validatorGitSha,
     validatorVersion: process.env.VALIDATOR_VERSION?.trim() || undefined,
   };
+}
+
+export function createRunConfig(benchmarkSeed: string): RunConfig {
+  return {
+    ...createPrepareConfig(benchmarkSeed),
+    ...readValidatorConfig(),
+  };
+}
+
+export function readRunConfig(): RunConfig {
+  return createRunConfig(requireBenchmarkSeed(process.env.BENCHMARK_SEED));
 }
 
 export function describeEnvironment(seed: string, benchmarkGitSha?: string) {
