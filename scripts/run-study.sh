@@ -208,8 +208,22 @@ if [[ "$FOREGROUND" -eq 1 ]]; then
   exit $?
 fi
 
+# Background mode: re-invoke this script with --foreground so the restart loop
+# runs inside a proper bash process with full array/function support.
+bg_args=(--foreground --study-id "$STUDY_ID")
+if [[ "$PILOT" -eq 1 ]]; then bg_args+=(--pilot); fi
+if [[ "$RESUME" -eq 1 ]]; then
+  bg_args+=(--resume)
+else
+  if [[ -n "$EXPLICIT_SEEDS" ]]; then
+    bg_args+=(--seeds "$EXPLICIT_SEEDS")
+  else
+    bg_args+=(--count "$COUNT" --seed-prefix "$SEED_PREFIX")
+  fi
+fi
+
 echo "Starting study ${STUDY_ID} in background (auto-restart enabled, max ${MAX_RESTARTS} restarts). Log: ${log_file}"
-nohup bash -c "$(declare -f run_with_restarts); STUDY_ID='${STUDY_ID}' log_file='${log_file}' study_args=(${study_args[*]@Q}) MAX_RESTARTS=${MAX_RESTARTS} RESTART_BASE_DELAY=${RESTART_BASE_DELAY} run_with_restarts" >>"$log_file" 2>&1 &
+nohup "${BASH_SOURCE[0]}" "${bg_args[@]}" >>"$log_file" 2>&1 &
 pid=$!
 echo "$pid" > "${STATE_DIR}/pid.txt"
 echo "PID: ${pid}"
