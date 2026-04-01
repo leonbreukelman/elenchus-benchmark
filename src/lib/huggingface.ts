@@ -27,23 +27,51 @@ function buildHeaders(token?: string): HeadersInit {
   return headers;
 }
 
-async function fetchText(url: string, token?: string): Promise<string> {
-  const response = await fetch(url, { headers: buildHeaders(token) });
+const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504]);
+const MAX_RETRIES = 2;
+const INITIAL_BACKOFF_MS = 1000;
+const FETCH_TIMEOUT_MS = 60_000;
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
+async function fetchWithRetry(url: string, token?: string): Promise<Response> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = INITIAL_BACKOFF_MS * 2 ** (attempt - 1);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: buildHeaders(token),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      continue;
+    }
+
+    if (response.ok || !RETRYABLE_STATUS_CODES.has(response.status) || attempt === MAX_RETRIES) {
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
+      }
+      return response;
+    }
+
+    lastError = new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
   }
 
+  throw lastError ?? new Error(`Failed to fetch ${url} after ${MAX_RETRIES + 1} attempts`);
+}
+
+async function fetchText(url: string, token?: string): Promise<string> {
+  const response = await fetchWithRetry(url, token);
   return response.text();
 }
 
 async function fetchJson<T>(url: string, token?: string): Promise<T> {
-  const response = await fetch(url, { headers: buildHeaders(token) });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
-  }
-
+  const response = await fetchWithRetry(url, token);
   return (await response.json()) as T;
 }
 

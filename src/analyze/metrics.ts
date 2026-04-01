@@ -2,15 +2,8 @@ import path from "node:path";
 import type { JoinedScenarioResult, NormalizedScenario, RunManifest, RunResult, Verdict } from "../types.js";
 import { csvEscape, writeJsonAtomic, writeTextAtomic } from "../lib/io.js";
 import { resultsDir } from "../lib/paths.js";
-
-function mean(values: number[]): number {
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function variance(values: number[]): number {
-  const center = mean(values);
-  return values.reduce((sum, value) => sum + (value - center) ** 2, 0) / values.length;
-}
+import { mean } from "../lib/stats.js";
+import { createSeededRng } from "../lib/random.js";
 
 function percentile(sortedValues: number[], fraction: number): number {
   if (sortedValues.length === 0) {
@@ -91,21 +84,7 @@ export function spearmanCorrelation(x: number[], y: number[]): number {
 }
 
 function deterministicBootstrapIndexes(seed: string, sampleSize: number, iterations: number): number[][] {
-  let state = 0;
-  for (const char of seed) {
-    state = (state * 31 + char.charCodeAt(0)) >>> 0;
-  }
-  if (state === 0) {
-    state = 0x9e3779b9;
-  }
-
-  const rng = () => {
-    state += 0x6d2b79f5;
-    let value = state;
-    value = Math.imul(value ^ (value >>> 15), value | 1);
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-  };
+  const rng = createSeededRng(seed, "bootstrap");
 
   const samples: number[][] = [];
   for (let iteration = 0; iteration < iterations; iteration += 1) {

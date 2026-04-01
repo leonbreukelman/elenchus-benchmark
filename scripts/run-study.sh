@@ -130,11 +130,7 @@ fi
 
 if [[ -z "$STUDY_ID" ]]; then
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  random_suffix="$(python3 - <<'PY'
-import secrets
-print(secrets.token_hex(4))
-PY
-)"
+  random_suffix="$(openssl rand -hex 4)"
   STUDY_ID="study-${MODE_LABEL}-${timestamp}-${random_suffix}"
 fi
 
@@ -170,7 +166,6 @@ log_file="${LOG_DIR}/${STUDY_ID}.log"
 if [[ "$FOREGROUND" -eq 1 ]]; then
   echo "Starting study ${STUDY_ID} in foreground. Log: ${log_file}"
   "${study_args[@]}" 2>&1 | tee -a "$log_file"
-  exit ${PIPESTATUS[0]}
 fi
 
 echo "Starting study ${STUDY_ID} in background. Log: ${log_file}"

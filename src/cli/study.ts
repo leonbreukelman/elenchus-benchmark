@@ -5,8 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateAnalysisArtifacts } from "../analyze/metrics.js";
 import { createPrepareConfig, readValidatorConfig } from "../lib/config.js";
-import { ensureDir, pathExists, readJsonFile, writeJsonAtomic, writeTextAtomic } from "../lib/io.js";
+import { csvEscape, ensureDir, pathExists, readJsonFile, writeJsonAtomic, writeTextAtomic } from "../lib/io.js";
 import { resultsDir, scenariosDir, studiesDir } from "../lib/paths.js";
+import { mean, sampleStandardDeviation } from "../lib/stats.js";
 import { prepareScenarios } from "../prepare/index.js";
 import { loadJoinedResults, runBenchmark } from "../run/runner.js";
 import type { RunManifest } from "../types.js";
@@ -332,17 +333,6 @@ function updateSeedRecord(manifest: StudyManifest, seed: string, update: Partial
   Object.assign(record, update);
 }
 
-function mean(values: number[]): number {
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function sampleStandardDeviation(values: number[]): number {
-  if (values.length < 2) return Number.NaN;
-  const center = mean(values);
-  const variance = values.reduce((sum, value) => sum + (value - center) ** 2, 0) / (values.length - 1);
-  return Math.sqrt(variance);
-}
-
 function toSummaryCsv(rows: ArchivedRunSummary[]): string {
   const header = [
     "seed",
@@ -361,19 +351,19 @@ function toSummaryCsv(rows: ArchivedRunSummary[]): string {
   ];
 
   const body = rows.map((row) => [
-    row.seed,
-    row.runId,
-    row.mode,
-    String(row.counts.completed),
-    String(row.counts.total),
-    String(row.counts.benchmarkOutcomes),
-    String(row.counts.transportFailures),
-    String(row.counts.validatorSystemFailures),
-    String(row.metrics.fallacyStrictPairAccuracy),
-    String(row.metrics.fallacyEvaluatedPairs),
-    String(row.metrics.ibmSpearman),
-    String(row.metrics.ibmEvaluatedScenarios),
-    row.archivedPaths.metrics,
+    csvEscape(row.seed),
+    csvEscape(row.runId),
+    csvEscape(row.mode),
+    csvEscape(row.counts.completed),
+    csvEscape(row.counts.total),
+    csvEscape(row.counts.benchmarkOutcomes),
+    csvEscape(row.counts.transportFailures),
+    csvEscape(row.counts.validatorSystemFailures),
+    csvEscape(row.metrics.fallacyStrictPairAccuracy),
+    csvEscape(row.metrics.fallacyEvaluatedPairs),
+    csvEscape(row.metrics.ibmSpearman),
+    csvEscape(row.metrics.ibmEvaluatedScenarios),
+    csvEscape(row.archivedPaths.metrics),
   ]);
 
   return `${header.join(",")}\n${body.map((row) => row.join(",")).join("\n")}\n`;

@@ -122,6 +122,7 @@ async function invokeValidator(
         proposedAction: scenario.proposedAction,
         reasoning: scenario.reasoning,
       }),
+      signal: AbortSignal.timeout(300_000),
     });
 
     const latencyMs = Date.now() - start;
@@ -374,7 +375,6 @@ export async function runBenchmark(config: {
     checkpoint = (await loadCheckpoint(manifest.runId)) ?? createCheckpointFromManifest(manifest);
     manifest.resumed = true;
     await reconcileManifestFromCheckpoint(manifest, checkpoint, latestPath);
-    await initializeRunDirectories(manifest.mode, manifest.runId, true);
   } else {
     const runId = buildRunId(config.mode);
     manifest = await createRunManifest({

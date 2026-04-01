@@ -1,5 +1,3 @@
-import { projectRoot } from "./paths.js";
-
 export interface PrepareConfig {
   benchmarkSeed: string;
   hfToken?: string;
@@ -77,13 +75,16 @@ export function readRunConfig(): RunConfig {
   return createRunConfig(requireBenchmarkSeed(process.env.BENCHMARK_SEED));
 }
 
-export function describeEnvironment(seed: string, benchmarkGitSha?: string) {
+export function describeEnvironment(seed: string, benchmarkGitSha?: string): BenchmarkEnvironment {
   return {
     benchmarkGitSha,
     nodeVersion: process.version,
     platform: process.platform,
     arch: process.arch,
     benchmarkSeed: seed,
-    projectRoot,
   };
 }
+
+// Re-exported from types.ts for convenience; keeps describeEnvironment's return
+// type aligned with the declared interface.
+import type { BenchmarkEnvironment } from "../types.js";
