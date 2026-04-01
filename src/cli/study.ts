@@ -12,6 +12,51 @@ import { prepareScenarios } from "../prepare/index.js";
 import { loadJoinedResults, runBenchmark } from "../run/runner.js";
 import type { RunManifest } from "../types.js";
 
+// ---------------------------------------------------------------------------
+// Resilience: validator health gating
+// ---------------------------------------------------------------------------
+
+const HEALTH_POLL_INTERVAL_MS = 15_000;
+const HEALTH_POLL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+export async function waitForValidator(
+  validatorUrl: string,
+  timeoutMs = HEALTH_POLL_TIMEOUT_MS,
+  pollIntervalMs = HEALTH_POLL_INTERVAL_MS,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  const healthUrl = new URL("/api/health", validatorUrl).toString();
+
+  while (true) {
+    try {
+      const response = await fetch(healthUrl, { signal: AbortSignal.timeout(10_000) });
+      if (response.ok) {
+        const body = await response.text();
+        if (body.includes('"status":"ok"')) return;
+      }
+    } catch {
+      // Validator not reachable — will retry
+    }
+
+    if (Date.now() >= deadline) {
+      throw new Error(`Validator at ${validatorUrl} did not become healthy within ${Math.round(timeoutMs / 60_000)} minutes.`);
+    }
+
+    const remaining = deadline - Date.now();
+    const delay = Math.min(pollIntervalMs, remaining);
+    if (delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resilience: per-seed retry
+// ---------------------------------------------------------------------------
+
+const MAX_SEED_RETRIES = 3;
+const SEED_RETRY_BASE_DELAY_MS = 30_000;
+
 type StudyMode = "pilot" | "full";
 
 interface ParsedArgs {
@@ -576,6 +621,11 @@ async function runSeed(manifest: StudyManifest, seed: string): Promise<void> {
   await writeStudySummary(manifest);
 }
 
+function formatDuration(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  return `${Math.round(ms / 60_000)}m`;
+}
+
 async function executeStudy(args: ParsedArgs): Promise<StudyManifest> {
   const manifest = args.resume ? await loadStudyManifest(args.studyId) : createStudyManifest(args);
 
@@ -589,16 +639,46 @@ async function executeStudy(args: ParsedArgs): Promise<StudyManifest> {
     .map((seedRun) => seedRun.seed);
 
   for (const seed of pendingSeeds) {
-    try {
-      await runSeed(manifest, seed);
-    } catch (error) {
+    let succeeded = false;
+
+    for (let attempt = 1; attempt <= MAX_SEED_RETRIES; attempt++) {
+      try {
+        console.log(`[${manifest.studyId}] Waiting for validator at ${manifest.validator.url}...`);
+        await waitForValidator(manifest.validator.url);
+
+        console.log(`[${manifest.studyId}] Running seed ${seed} (attempt ${attempt}/${MAX_SEED_RETRIES})...`);
+        await runSeed(manifest, seed);
+        succeeded = true;
+        break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+
+        updateSeedRecord(manifest, seed, {
+          status: "pending",
+          error: `Attempt ${attempt}/${MAX_SEED_RETRIES}: ${message}`,
+        });
+        manifest.activeSeed = seed;
+        await writeStudyManifest(manifest);
+
+        if (attempt < MAX_SEED_RETRIES) {
+          const delay = SEED_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+          console.error(`[${manifest.studyId}] Seed ${seed} failed (attempt ${attempt}/${MAX_SEED_RETRIES}): ${message}`);
+          console.error(`[${manifest.studyId}] Retrying in ${formatDuration(delay)}...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else {
+          console.error(`[${manifest.studyId}] Seed ${seed} failed after ${MAX_SEED_RETRIES} attempts: ${message}`);
+        }
+      }
+    }
+
+    if (!succeeded) {
       updateSeedRecord(manifest, seed, {
         status: "pending",
-        error: error instanceof Error ? error.message : String(error),
+        error: `All ${MAX_SEED_RETRIES} attempts exhausted.`,
       });
-      manifest.activeSeed = seed;
+      manifest.activeSeed = undefined;
       await writeStudyManifest(manifest);
-      throw error;
+      throw new Error(`Seed ${seed} failed after ${MAX_SEED_RETRIES} attempts. Study paused — resume with --resume.`);
     }
   }
 

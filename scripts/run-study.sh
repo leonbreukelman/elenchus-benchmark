@@ -163,15 +163,56 @@ export VALIDATOR_GIT_SHA
 
 log_file="${LOG_DIR}/${STUDY_ID}.log"
 
+# ---------------------------------------------------------------------------
+# Auto-restart loop
+#
+# If the study process exits non-zero, wait with exponential backoff and
+# resume automatically. This handles process-level crashes, OOM kills, and
+# transient infrastructure failures that survive the in-process retry logic.
+# ---------------------------------------------------------------------------
+
+MAX_RESTARTS=10
+RESTART_BASE_DELAY=60  # seconds
+
+run_with_restarts() {
+  local restart_count=0
+  local resume_args=(npm run study -- --resume --study-id "$STUDY_ID")
+
+  while true; do
+    if [[ "$restart_count" -eq 0 ]]; then
+      echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting study ${STUDY_ID}" >> "$log_file"
+      "${study_args[@]}" >> "$log_file" 2>&1 && return 0
+    else
+      echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Restart ${restart_count}/${MAX_RESTARTS}: resuming study ${STUDY_ID}" >> "$log_file"
+      "${resume_args[@]}" >> "$log_file" 2>&1 && return 0
+    fi
+
+    restart_count=$((restart_count + 1))
+    if [[ "$restart_count" -gt "$MAX_RESTARTS" ]]; then
+      echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Study ${STUDY_ID} failed after ${MAX_RESTARTS} restarts. Giving up." >> "$log_file"
+      return 1
+    fi
+
+    local delay=$(( RESTART_BASE_DELAY * (2 ** (restart_count - 1)) ))
+    if [[ "$delay" -gt 1800 ]]; then
+      delay=1800  # cap at 30 minutes
+    fi
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Study exited non-zero. Restarting in ${delay}s (attempt ${restart_count}/${MAX_RESTARTS})..." >> "$log_file"
+    sleep "$delay"
+  done
+}
+
 if [[ "$FOREGROUND" -eq 1 ]]; then
-  echo "Starting study ${STUDY_ID} in foreground. Log: ${log_file}"
-  "${study_args[@]}" 2>&1 | tee -a "$log_file"
+  echo "Starting study ${STUDY_ID} in foreground (auto-restart enabled). Log: ${log_file}"
+  run_with_restarts 2>&1 | tee -a "$log_file"
+  exit $?
 fi
 
-echo "Starting study ${STUDY_ID} in background. Log: ${log_file}"
-nohup "${study_args[@]}" >>"$log_file" 2>&1 &
+echo "Starting study ${STUDY_ID} in background (auto-restart enabled, max ${MAX_RESTARTS} restarts). Log: ${log_file}"
+nohup bash -c "$(declare -f run_with_restarts); STUDY_ID='${STUDY_ID}' log_file='${log_file}' study_args=(${study_args[*]@Q}) MAX_RESTARTS=${MAX_RESTARTS} RESTART_BASE_DELAY=${RESTART_BASE_DELAY} run_with_restarts" >>"$log_file" 2>&1 &
 pid=$!
 echo "$pid" > "${STATE_DIR}/pid.txt"
 echo "PID: ${pid}"
 echo "Study ID recorded in ${STUDY_ID_FILE}"
-echo "Resume with: scripts/run-study.sh --resume"
+echo "Tail log: tail -f ${log_file}"
+echo "Resume manually: scripts/run-study.sh --resume"
